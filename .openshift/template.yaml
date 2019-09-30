@@ -1,0 +1,369 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+labels:
+  template: build-your-own-radar
+message: >-
+  The following service have been created in your project: ${APP_NAME}-${DEPL_ID}
+  For more information about using this template see https://github.com/oip-rnd/build-your-own-radar
+metadata:
+  annotations:
+    description: |-
+      Build-your-own-radar is an open source library that generates an interactive radar, inspired by thoughtworks.com/radar.
+
+      Demo
+
+        You can see this in action by following instructions described at https://github.com/oip-rnd/build-your-own-radar#demo.
+
+      How To Use
+
+        The easiest way to use the app out of the box is to provide a public Google Sheet ID from which all the data will be fetched.
+        You can enter that ID into the input field on the first page of the application, and your radar will be generated.
+        The data must conform to the format expected by the tool for the radar to be generated correctly.
+
+        If you don't want to use Google Sheet, you can deploy the EtherCalc component also available in this service catalog. It provides basic
+        functionnalities similar to Google Sheet to edit and share your data.
+
+      Consult the following reference for more information:
+        - Cloud Innovation Platform - Build-Your-Own-Radar Project: https://github.com/oip-rnd/build-your-own-radar
+        - Upstream Build-Your-Own-Radar Project: https://github.com/thoughtworks/build-your-own-radar
+        - ThoughtWorks Technology Radar: https://www.thoughtworks.com/radar
+        - using this template, including OpenShift considerations : https://github.com/oip-rnd/build-your-own-radar
+
+    iconClass: icon-radar-3
+    openshift.io/documentation-url: https://github.com/societe-generale/cloud-innovation-platform.git
+    openshift.io/long-description: See description
+    openshift.io/provider-display-name: Societe Generale, Cloud Innovation Platform team
+    openshift.io/support-url: https://github.com/societe-generale/cloud-innovation-platform.git
+    openshift.io/display-name: build-your-own-radar
+    tags: cip,analytics
+    template.openshift.io/documentation-url: https://github.com/oip-rnd/build-your-own-radar
+    template.openshift.io/bindable: "false"
+  name: build-your-own-radar
+
+objects:
+
+# IMAGESTREAM ---------------------------------
+
+  - apiVersion: v1
+    kind: ImageStream
+    metadata:
+      labels:
+        app: '${APP_NAME}-${DEPL_ID}'
+      name: '${APP_NAME}-nodejs-${DEPL_ID}'
+    spec:
+      lookupPolicy:
+        local: false
+
+  - apiVersion: v1
+    kind: ImageStream
+    metadata:
+      labels:
+        app: '${APP_NAME}-${DEPL_ID}'
+      name: '${APP_NAME}-nginx-${DEPL_ID}'
+    spec:
+      lookupPolicy:
+        local: false
+
+  # SERVICE ---***be shure that port is 8080--------------------------------
+
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      labels:
+        app: '${APP_NAME}-${DEPL_ID}'
+      name: '${APP_NAME}-${DEPL_ID}'
+    spec:
+      ports:
+        - name: 8080-tcp
+          port: 8080
+          protocol: TCP
+          targetPort: 8080
+      selector:
+        app: '${APP_NAME}-${DEPL_ID}'
+        deploymentconfig: '${APP_NAME}-${DEPL_ID}'
+      sessionAffinity: None
+      type: ClusterIP
+
+  # ROUTE --------------------------------------
+
+  - apiVersion: v1
+    kind: Route
+    metadata:
+      annotations:
+        kubernetes.io/tls-acme: 'true'
+      labels:
+        app: '${APP_NAME}-${DEPL_ID}'
+      name: '${APP_NAME}-${DEPL_ID}'
+    spec:
+      port:
+        targetPort: 8080-tcp
+      to:
+        kind: Service
+        name: '${APP_NAME}-${DEPL_ID}'
+        weight: 100
+      wildcardPolicy: None
+
+  # SECRETS -------------------------------------
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      labels:
+        app: '${APP_NAME}-${DEPL_ID}'
+        build: '${APP_NAME}-nodejs-${DEPL_ID}'
+    metadata:
+      name: '${APP_NAME}-build-trigger-${DEPL_ID}'
+    stringData:
+      WebHookSecretKey: ${BUILD_TRIGGER_SECRET}
+
+  # BUILDCONFIG ---------------------------------
+    # NODEJS ---
+  - apiVersion: v1
+    kind: BuildConfig
+    metadata:
+      labels:
+        app: '${APP_NAME}-${DEPL_ID}'
+        build: ${APP_NAME}-nodejs-${DEPL_ID}
+      name: ${APP_NAME}-nodejs-${DEPL_ID}
+    spec:
+      nodeSelector: null
+      output:
+        to:
+          kind: ImageStreamTag
+          name: '${APP_NAME}-nodejs-${DEPL_ID}:latest'
+      postCommit: {}
+      resources: {}
+      runPolicy: Serial
+      source:
+        git:
+          uri: ${FRONTEND_GIT_REPO}
+          ref: ${FRONTEND_GIT_REPO_REF}
+        type: Git
+      strategy:
+        sourceStrategy:
+          env:
+            - name: BUILD_LOGLEVEL
+              value: ${BUILD_LOGLEVEL}
+            - name: NPM_CONFIG_STRICT_SSL
+              value: ${NPM_CONFIG_STRICT_SSL}
+            - name: NPM_MIRROR
+              value: ${NPM_MIRROR}
+            - name: SASS_BINARY_SITE
+              value: ${SASS_BINARY_SITE}
+            - name: CYPRESS_INSTALL_BINARY
+              value: ${CYPRESS_INSTALL_BINARY}
+          from:
+            kind: DockerImage
+            name: docker-registry.default.svc:5000/${NS_GLOBAL_IMAGES}/${FE_BUILD_IMAGE}:${FE_BUILD_IMAGE_TAG}
+        type: Source
+      triggers:
+        - type: "Generic"
+          generic:
+            secretReference:
+              name: '${APP_NAME}-build-trigger-${DEPL_ID}'
+            allowEnv: false
+        - type: "GitHub"
+          github:
+            secretReference:
+              name: '${APP_NAME}-build-trigger-${DEPL_ID}'
+        - type: ConfigChange
+
+      # NGINX ---
+  - apiVersion: v1
+    kind: BuildConfig
+    metadata:
+      labels:
+        app: '${APP_NAME}-${DEPL_ID}'
+        build: ${APP_NAME}-nginx-${DEPL_ID}
+      name: ${APP_NAME}-nginx-${DEPL_ID}
+    spec:
+      nodeSelector: null
+      output:
+        to:
+          kind: ImageStreamTag
+          name: '${APP_NAME}-nginx-${DEPL_ID}:latest'
+      postCommit: {}
+      resources: {}
+      runPolicy: Serial
+      source:
+        dockerfile: >-
+          FROM nginx
+
+          ## Copy our nginx config
+
+          #COPY nginx/ $NGINX_CONFIGURATION_PATH
+
+          ## Remove default nginx website
+
+          ## RUN rm -rf /usr/share/nginx/html/*
+
+          ## copy over the artifacts in dist folder to default nginx public folder /usr/share/nginx/html or /opt/app-root/src
+
+          COPY dist/ /opt/app-root/src
+
+          ## Change owner
+
+          #USER root
+
+          #RUN chown -R nginx:nginx /opt/app-root/src
+
+          #USER 1001
+
+          EXPOSE 8080
+
+          CMD ["nginx", "-g", "daemon off;"]
+        images:
+          - from:
+              kind: ImageStreamTag
+              name: '${APP_NAME}-nodejs-${DEPL_ID}:latest'
+            paths:
+              - destinationDir: .
+                sourcePath: /opt/app-root/src/dist
+        type: Dockerfile
+      strategy:
+        dockerStrategy:
+          from:
+            kind: DockerImage
+            name: docker-registry.default.svc:5000/${NS_GLOBAL_IMAGES}/nginx:${FE_RUNTIME_IMAGE_TAG}
+        type: Docker
+      triggers:
+      - imageChange:
+          from:
+            kind: "ImageStreamTag"
+            name: "${APP_NAME}-nodejs-${DEPL_ID}:latest"
+        type: ImageChange
+
+  # DEPLOYMENTCONFIG ---------------------------------
+
+  - apiVersion: v1
+    kind: DeploymentConfig
+    metadata:
+      labels:
+        app: '${APP_NAME}-${DEPL_ID}'
+      name: '${APP_NAME}-${DEPL_ID}'
+    spec:
+      replicas: 1
+      selector:
+        app: ${APP_NAME}-${DEPL_ID}
+        deploymentconfig: ${APP_NAME}-${DEPL_ID}
+      strategy:
+        activeDeadlineSeconds: 21600
+        resources: {}
+        rollingParams:
+          intervalSeconds: 1
+          maxSurge: 25%
+          maxUnavailable: 25%
+          timeoutSeconds: 600
+          updatePeriodSeconds: 1
+        type: Rolling
+      template:
+        metadata:
+          labels:
+            app: ${APP_NAME}-${DEPL_ID}
+            deploymentconfig: ${APP_NAME}-${DEPL_ID}
+        spec:
+          containers:
+          - image: ${APP_NAME}-nginx-${DEPL_ID}:latest
+            imagePullPolicy: Always
+            name: ${APP_NAME}-${DEPL_ID}
+            ports:
+            - containerPort: 80
+              protocol: TCP
+            - containerPort: 8080
+              protocol: TCP
+            resources: {}
+            terminationMessagePath: /dev/termination-log
+            terminationMessagePolicy: File
+          dnsPolicy: ClusterFirst
+          restartPolicy: Always
+          schedulerName: default-scheduler
+          securityContext: {}
+          terminationGracePeriodSeconds: 30
+      test: false
+      triggers:
+      - type: ConfigChange
+      - imageChangeParams:
+          automatic: true
+          containerNames:
+          - ${APP_NAME}-${DEPL_ID}
+          from:
+            kind: ImageStreamTag
+            name: ${APP_NAME}-nginx-${DEPL_ID}:latest
+        type: ImageChange
+
+# PARAMTERS -------------------------------------
+
+parameters:
+
+# GLOBAL ----------------------------------------
+  - description: >-
+      Name of the application. All objects created by this template will be
+      prefixed by this app name
+    displayName: Application Name
+    name: APP_NAME
+    required: true
+    value: byor
+  - description: >-
+      Unique app deployment identifyer. You can specify one or let the system
+      generate one automatically for you.
+    displayName: (Optional) Deployment ID
+    from: '[a-z0-9]{5}'
+    generate: expression
+    name: DEPL_ID
+    required: true
+  - description: >-
+      (Optional) Name of the namespace containing BuildConfig ImageStream.
+      Leaving as default should be fine.
+    displayName: Namespace containing public images.
+    name: NS_GLOBAL_IMAGES
+    required: true
+    value: openshift
+
+# SPECIFICS PARAMETERS ------------------------------------------------
+  - description: git repository containing frontend source code
+    name: FRONTEND_GIT_REPO
+    required: true
+    value: https://github.com/oip-rnd/build-your-own-radar.git
+  - description: git branch to use to fetch frontend source code
+    name: FRONTEND_GIT_REPO_REF
+    required: true
+    value: master
+  - description: source pull secret to use to pull source code from repo
+    displayName: Source Pull Secret
+    name: SOURCE_PULL_SECRET
+    required: false
+  - description: Name of the frontend build image to use
+    name: FE_BUILD_IMAGE
+    required: true
+    value: nodejs-10
+  - description: Tag of the frontend build image to use
+    name: FE_BUILD_IMAGE_TAG
+    required: true
+    value: 'latest'
+  - description: Tag of the frontend runtime image to use
+    name: FE_RUNTIME_IMAGE_TAG
+    required: true
+    value: '1.12'
+  - description: Build log level
+    name: BUILD_LOGLEVEL
+    value: '1'
+  - description: Internal mirror for NPM
+    name: NPM_MIRROR
+    required: false
+  - description: Verify NPM Mirror SSL certificate
+    name: NPM_CONFIG_STRICT_SSL
+    value: 'true'
+  - description: Mirror to download SAAS binaries from
+    name: SASS_BINARY_SITE
+    required: false
+  - description: Mirror to download Cypress.io binaries from
+    name: CYPRESS_INSTALL_BINARY
+    required: true
+    value: '0'
+  - description: >-
+      Unique app-specific secret used to trigger builds. You can specify one or let the system
+      generate one automatically for you.
+    displayName: (Optional) Build Trigger Secret
+    from: '[a-zA-Z0-9]{16}'
+    generate: expression
+    name: BUILD_TRIGGER_SECRET
+    required: true
