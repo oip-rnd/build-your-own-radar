@@ -151,7 +151,7 @@ const GoogleSheet = function (sheetReference, sheetName) {
   return self
 }
 
-const CSVDocument = function (url) {
+const CSVDocument = function (url, queryParamsMap) {
   var self = {}
 
   self.build = function () {
@@ -166,7 +166,7 @@ const CSVDocument = function (url) {
       contentValidator.verifyContent()
       contentValidator.verifyHeaders()
       var blips = _.map(data, new InputSanitizer().sanitize)
-      plotRadar(FileName(url), blips, 'CSV File', [])
+      plotRadar(decodeURIComponent(queryParamsMap.title), blips, 'CSV File', [])
     } catch (exception) {
       plotErrorMessage(exception)
     }
@@ -204,9 +204,16 @@ const GoogleSheetInput = function () {
     var domainName = DomainName(window.location.search.substring(1))
     var queryString = window.location.href.match(/sheetId(.*)/)
     var queryParams = queryString ? QueryParams(queryString[0]) : {}
+    let sheetId = queryParams.sheetId
+    let queryParamsMap = window.location.search.substring(1).split('&').reduce((acc, kv) => {
+      let k = kv.split('=')[0]
+      let v = kv.split('=')[1]
+      acc[k] = v
+      return acc
+    }, {})
 
     if (domainName && queryParams.sheetId.endsWith('csv')) {
-      sheet = CSVDocument(queryParams.sheetId)
+      sheet = CSVDocument(queryParams.sheetId, queryParamsMap)
       sheet.init().build()
     } else if (domainName && domainName.endsWith('google.com') && queryParams.sheetId) {
       sheet = GoogleSheet(queryParams.sheetId, queryParams.sheetName)
